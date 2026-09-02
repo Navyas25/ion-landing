@@ -15,7 +15,7 @@ export function useSmoothScroll(enabled = true) {
 
     // Lenis settings tuned like lenis.darkroom.engineering
     const lenis = new Lenis({
-      lerp: 0.15,
+      lerp: 0.07,
       smoothWheel: true,
       wheelMultiplier: 0.9,
       touchMultiplier: 1.2,

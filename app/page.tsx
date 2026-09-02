@@ -179,7 +179,7 @@ export default function Home() {
   useEffect(() => {
     if (!show) return;
 
-    // Continuous scrub — 1:1 with native scroll
+    // Continuous scrub — 1:1 with Lenis scroll, no lag (like lenis.darkroom)
     const st = ScrollTrigger.create({
       trigger: "#scroll-track",
       start: "top top",
