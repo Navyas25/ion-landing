@@ -10,7 +10,7 @@ import {
 import { useImageSequence } from "@/hooks/useImageSequence";
 
 export interface ProductCanvasHandle {
-  /** Scroll only sets the *target* — rAF loop renders the matching frame */
+  /** Draw frame on next animation frame — no continuous loop */
   setProgress: (p: number) => void;
 }
 
@@ -32,8 +32,10 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
     ref
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const targetFrameRef = useRef(0);
-    const lastDrawnRef = useRef(-1);
+  const lastDrawnRef = useRef(-1);
+  const currentFrameRef = useRef(0);
+  const pendingFrameRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
     const { getImage, ready, progress } = useImageSequence(
       frameCount,
@@ -97,37 +99,12 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
       [getImage, frameCount]
     );
 
-    /**
-     * Core loop:
-     *  - Scroll events ONLY write targetFrameRef
-     *  - This rAF loop reads the exact target and renders the matching frame
-     *  - No interpolation — the can is directly connected to scroll position
-     *  - lastDrawnRef prevents redundant draws when the frame hasn't changed
-     */
-    useEffect(() => {
-      let raf = 0;
-      let running = true;
 
-      const tick = () => {
-        if (!running) return;
-
-        // Draw the exact frame the scroll dictates — no chasing
-        draw(targetFrameRef.current);
-
-        raf = requestAnimationFrame(tick);
-      };
-
-      raf = requestAnimationFrame(tick);
-      return () => {
-        running = false;
-        cancelAnimationFrame(raf);
-      };
-    }, [draw, ready]);
 
     useEffect(() => {
       const onResize = () => {
         lastDrawnRef.current = -1;
-        draw(targetFrameRef.current);
+        draw(currentFrameRef.current);
       };
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
@@ -143,9 +120,19 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
 
     useImperativeHandle(ref, () => ({
       setProgress: (p: number) => {
-        // Lightweight: only update target. rAF loop renders it directly.
-        targetFrameRef.current =
-          Math.max(0, Math.min(1, p)) * (frameCount - 1);
+        const frame = Math.max(0, Math.min(1, p)) * (frameCount - 1);
+        pendingFrameRef.current = frame;
+
+        if (rafRef.current !== null) return;
+
+        rafRef.current = requestAnimationFrame(() => {
+          if (pendingFrameRef.current !== null) {
+            draw(pendingFrameRef.current);
+            currentFrameRef.current = pendingFrameRef.current;
+          }
+          pendingFrameRef.current = null;
+          rafRef.current = null;
+        });
       },
     }));
 
