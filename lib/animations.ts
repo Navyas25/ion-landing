@@ -15,7 +15,7 @@ export function createScrollAnimations(
       trigger: containerRef,
       start: "top top",
       end: "bottom bottom",
-      scrub: 0.5,
+      scrub: true,
       onUpdate: (self) => {
         canvasRef.current?.setProgress(self.progress);
       },
@@ -35,7 +35,7 @@ export function createScrollAnimations(
             trigger: el,
             start: "top 85%",
             end: "top 50%",
-            scrub: 0.8,
+            scrub: true,
           },
         }
       );

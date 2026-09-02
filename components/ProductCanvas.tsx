@@ -10,7 +10,6 @@ import {
 import { useImageSequence } from "@/hooks/useImageSequence";
 
 export interface ProductCanvasHandle {
-  /** Scroll only sets the *target* — rAF loop renders the matching frame */
   setProgress: (p: number) => void;
 }
 
@@ -32,8 +31,10 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
     ref
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const targetFrameRef = useRef(0);
-    const lastDrawnRef = useRef(-1);
+    const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+    const currentFrameRef = useRef(0);
+    const pendingFrameRef = useRef<number | null>(null);
+    const rafRef = useRef<number | null>(null);
 
     const { getImage, ready, progress } = useImageSequence(
       frameCount,
@@ -46,26 +47,20 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
       (frameFloat: number) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const ctx = canvas.getContext("2d", { alpha: true });
+
+        if (!ctxRef.current) {
+          ctxRef.current = canvas.getContext("2d", { alpha: true });
+        }
+        const ctx = ctxRef.current;
         if (!ctx) return;
-
-        const idx = Math.max(
-          0,
-          Math.min(frameCount - 1, Math.round(frameFloat))
-        );
-        if (idx === lastDrawnRef.current) return;
-        lastDrawnRef.current = idx;
-
-        const img = getImage(idx);
-        if (!img || !img.complete || img.naturalWidth === 0) return;
 
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
         if (w === 0 || h === 0) return;
 
-        const tw = Math.floor(w * dpr);
-        const th = Math.floor(h * dpr);
+        const tw = Math.round(w * dpr);
+        const th = Math.round(h * dpr);
         if (canvas.width !== tw || canvas.height !== th) {
           canvas.width = tw;
           canvas.height = th;
@@ -73,81 +68,91 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
         }
 
         ctx.clearRect(0, 0, w, h);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
 
-        // object-fit: cover
+        // Split into integer frame + fractional part for crossfade
+        const clamped = Math.max(0, Math.min(frameCount - 1, frameFloat));
+        const idx = Math.floor(clamped);
+        const frac = clamped - idx;
+
+        const img = getImage(idx);
+        if (!img || !img.complete || img.naturalWidth === 0) return;
+
+        // object-fit: cover dimensions
         const imgAspect = img.naturalWidth / img.naturalHeight;
         const canvasAspect = w / h;
         let dw: number, dh: number, x: number, y: number;
         if (imgAspect > canvasAspect) {
-          dh = h;
-          dw = h * imgAspect;
-          x = (w - dw) / 2;
-          y = 0;
+          dh = h; dw = h * imgAspect; x = (w - dw) / 2; y = 0;
         } else {
-          dw = w;
-          dh = w / imgAspect;
-          x = 0;
-          y = (h - dh) / 2;
+          dw = w; dh = w / imgAspect; x = 0; y = (h - dh) / 2;
         }
 
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
+        // Draw current frame at full opacity
+        ctx.globalAlpha = 1;
         ctx.drawImage(img, x, y, dw, dh);
+
+        // Crossfade: blend next frame on top when between frames
+        if (frac > 0.01 && idx < frameCount - 1) {
+          const nextImg = getImage(idx + 1);
+          if (nextImg && nextImg.complete && nextImg.naturalWidth > 0) {
+            ctx.globalAlpha = frac;
+            ctx.drawImage(nextImg, x, y, dw, dh);
+            ctx.globalAlpha = 1;
+          }
+        }
       },
       [getImage, frameCount]
     );
 
-    /**
-     * Core loop:
-     *  - Scroll events ONLY write targetFrameRef
-     *  - This rAF loop reads the exact target and renders the matching frame
-     *  - No interpolation — the can is directly connected to scroll position
-     *  - lastDrawnRef prevents redundant draws when the frame hasn't changed
-     */
     useEffect(() => {
-      let raf = 0;
-      let running = true;
-
-      const tick = () => {
-        if (!running) return;
-
-        // Draw the exact frame the scroll dictates — no chasing
-        draw(targetFrameRef.current);
-
-        raf = requestAnimationFrame(tick);
-      };
-
-      raf = requestAnimationFrame(tick);
       return () => {
-        running = false;
-        cancelAnimationFrame(raf);
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+        }
       };
-    }, [draw, ready]);
+    }, []);
 
     useEffect(() => {
       const onResize = () => {
-        lastDrawnRef.current = -1;
-        draw(targetFrameRef.current);
+        requestAnimationFrame(() => {
+          draw(currentFrameRef.current);
+        });
       };
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
     }, [draw]);
 
-    // When frames become ready, paint the first frame
+    // Draw first frame when ready
     useEffect(() => {
       if (ready) {
-        lastDrawnRef.current = -1;
+        currentFrameRef.current = 0;
         draw(0);
       }
     }, [ready, draw]);
 
-    useImperativeHandle(ref, () => ({
-      setProgress: (p: number) => {
-        // Lightweight: only update target. rAF loop renders it directly.
-        targetFrameRef.current =
-          Math.max(0, Math.min(1, p)) * (frameCount - 1);
-      },
-    }));
+    useImperativeHandle(
+      ref,
+      () => ({
+        setProgress: (p: number) => {
+          pendingFrameRef.current =
+            Math.max(0, Math.min(1, p)) * (frameCount - 1);
+
+          if (rafRef.current !== null) return;
+
+          rafRef.current = requestAnimationFrame(() => {
+            if (pendingFrameRef.current !== null) {
+              currentFrameRef.current = pendingFrameRef.current;
+              draw(pendingFrameRef.current);
+              pendingFrameRef.current = null;
+            }
+            rafRef.current = null;
+          });
+        },
+      }),
+      [draw, frameCount]
+    );
 
     return (
       <div className={`relative w-full h-full ${className}`}>
