@@ -7,6 +7,7 @@ import {
   forwardRef,
   useImperativeHandle,
 } from "react";
+import { gsap } from "gsap";
 import { useImageSequence } from "@/hooks/useImageSequence";
 
 export interface ProductCanvasHandle {
@@ -31,10 +32,10 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
     ref
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-    const currentFrameRef = useRef(0);
-    const pendingFrameRef = useRef<number | null>(null);
-    const rafRef = useRef<number | null>(null);
+    const targetFrameRef = useRef(0);
+    const lastDrawnRef = useRef(-1);
+    const lastIntFrameRef = useRef(-1);
+    const coverRef = useRef<{ dw: number; dh: number; x: number; y: number } | null>(null);
 
     const { getImage, ready, progress } = useImageSequence(
       frameCount,
@@ -47,20 +48,38 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
       (frameFloat: number) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        if (!ctxRef.current) {
-          ctxRef.current = canvas.getContext("2d", { alpha: true });
-        }
-        const ctx = ctxRef.current;
+        const ctx = canvas.getContext("2d", { alpha: true });
         if (!ctx) return;
+
+        const clamped = Math.max(0, Math.min(frameCount - 1, frameFloat));
+        if (clamped === lastDrawnRef.current) return;
+        lastDrawnRef.current = clamped;
+
+        const idxLo = Math.floor(clamped);
+        const idxHi = Math.min(frameCount - 1, idxLo + 1);
+        const frac = clamped - idxLo;
+
+        // Only blend in a narrow band around the switch point (soft snap).
+        // Outside this band, show a single sharp frame — no ghosting.
+        const BLEND_HALF_WIDTH = 0.18;
+        const blendAlpha =
+          frac < BLEND_HALF_WIDTH
+            ? 0
+            : frac > 1 - BLEND_HALF_WIDTH
+            ? 1
+            : (frac - BLEND_HALF_WIDTH) / (1 - 2 * BLEND_HALF_WIDTH);
+
+        const imgLo = getImage(idxLo);
+        const imgHi = getImage(idxHi);
+        if (!imgLo || !imgLo.complete || imgLo.naturalWidth === 0) return;
 
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
         if (w === 0 || h === 0) return;
 
-        const tw = Math.round(w * dpr);
-        const th = Math.round(h * dpr);
+        const tw = Math.floor(w * dpr);
+        const th = Math.floor(h * dpr);
         if (canvas.width !== tw || canvas.height !== th) {
           canvas.width = tw;
           canvas.height = th;
@@ -68,57 +87,62 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
         }
 
         ctx.clearRect(0, 0, w, h);
+
+        // Cache cover dimensions — only recalc on resize
+        if (!coverRef.current || canvas.width !== tw || canvas.height !== th) {
+          const imgAspect = imgLo.naturalWidth / imgLo.naturalHeight;
+          const canvasAspect = w / h;
+          if (imgAspect > canvasAspect) {
+            coverRef.current = { dh: h, dw: h * imgAspect, x: (w - h * imgAspect) / 2, y: 0 };
+          } else {
+            coverRef.current = { dw: w, dh: w / imgAspect, x: 0, y: (h - w / imgAspect) / 2 };
+          }
+        }
+        const { dw, dh, x, y } = coverRef.current;
+
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
 
-        // Split into integer frame + fractional part for crossfade
-        const clamped = Math.max(0, Math.min(frameCount - 1, frameFloat));
-        const idx = Math.floor(clamped);
-        const frac = clamped - idx;
-
-        const img = getImage(idx);
-        if (!img || !img.complete || img.naturalWidth === 0) return;
-
-        // object-fit: cover dimensions
-        const imgAspect = img.naturalWidth / img.naturalHeight;
-        const canvasAspect = w / h;
-        let dw: number, dh: number, x: number, y: number;
-        if (imgAspect > canvasAspect) {
-          dh = h; dw = h * imgAspect; x = (w - dw) / 2; y = 0;
+        if (blendAlpha <= 0) {
+          ctx.globalAlpha = 1;
+          ctx.drawImage(imgLo, x, y, dw, dh);
+        } else if (blendAlpha >= 1) {
+          ctx.globalAlpha = 1;
+          ctx.drawImage(imgHi ?? imgLo, x, y, dw, dh);
         } else {
-          dw = w; dh = w / imgAspect; x = 0; y = (h - dh) / 2;
+          ctx.globalAlpha = 1;
+          ctx.drawImage(imgLo, x, y, dw, dh);
+          if (imgHi && imgHi.complete && imgHi.naturalWidth > 0) {
+            ctx.globalAlpha = blendAlpha;
+            ctx.drawImage(imgHi, x, y, dw, dh);
+          }
         }
-
-        // Draw current frame at full opacity
         ctx.globalAlpha = 1;
-        ctx.drawImage(img, x, y, dw, dh);
 
-        // Crossfade: blend next frame on top when between frames
-        if (frac > 0.01 && idx < frameCount - 1) {
-          const nextImg = getImage(idx + 1);
-          if (nextImg && nextImg.complete && nextImg.naturalWidth > 0) {
-            ctx.globalAlpha = frac;
-            ctx.drawImage(nextImg, x, y, dw, dh);
-            ctx.globalAlpha = 1;
+        // Decode prefetch — only when integer frame changes, not every sub-float tick
+        if (idxLo !== lastIntFrameRef.current) {
+          lastIntFrameRef.current = idxLo;
+          for (let i = Math.max(0, idxLo - 3); i <= Math.min(frameCount - 1, idxLo + 3); i++) {
+            getImage(i)?.decode?.().catch(() => {});
           }
         }
       },
       [getImage, frameCount]
     );
 
+    // Drive canvas draw from GSAP ticker — same tick as Lenis/ScrollTrigger
     useEffect(() => {
-      return () => {
-        if (rafRef.current !== null) {
-          cancelAnimationFrame(rafRef.current);
-        }
-      };
-    }, []);
+      if (!ready) return;
+      const cb = () => draw(targetFrameRef.current);
+      gsap.ticker.add(cb);
+      return () => gsap.ticker.remove(cb);
+    }, [draw, ready]);
 
     useEffect(() => {
       const onResize = () => {
-        requestAnimationFrame(() => {
-          draw(currentFrameRef.current);
-        });
+        lastDrawnRef.current = -1;
+        coverRef.current = null;
+        draw(targetFrameRef.current);
       };
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
@@ -127,7 +151,8 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
     // Draw first frame when ready
     useEffect(() => {
       if (ready) {
-        currentFrameRef.current = 0;
+        targetFrameRef.current = 0;
+        lastDrawnRef.current = -1;
         draw(0);
       }
     }, [ready, draw]);
@@ -136,22 +161,11 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
       ref,
       () => ({
         setProgress: (p: number) => {
-          pendingFrameRef.current =
+          targetFrameRef.current =
             Math.max(0, Math.min(1, p)) * (frameCount - 1);
-
-          if (rafRef.current !== null) return;
-
-          rafRef.current = requestAnimationFrame(() => {
-            if (pendingFrameRef.current !== null) {
-              currentFrameRef.current = pendingFrameRef.current;
-              draw(pendingFrameRef.current);
-              pendingFrameRef.current = null;
-            }
-            rafRef.current = null;
-          });
         },
       }),
-      [draw, frameCount]
+      [frameCount]
     );
 
     return (

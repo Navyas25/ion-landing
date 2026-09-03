@@ -15,15 +15,15 @@ export function useSmoothScroll(enabled = true) {
 
     // Lenis settings tuned like lenis.darkroom.engineering
     const lenis = new Lenis({
-      duration: 1.0,
-      easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      duration: 0.5,
+      easing: (t: number) => 1 - Math.pow(1 - t, 3),
       smoothWheel: true,
-      wheelMultiplier: 0.9,
+      wheelMultiplier: 1.0,
       touchMultiplier: 1.2,
       orientation: "vertical",
       gestureOrientation: "vertical",
       infinite: false,
-      autoRaf: false, // we drive via GSAP ticker
+      autoRaf: false,
     });
 
     lenisRef.current = lenis;
