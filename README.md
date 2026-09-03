@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ION Classic Alpha — Landing Page
+
+A scroll-driven product showcase for the ION energy drink, featuring a 477-frame image sequence of a rotating can that responds to user scroll.
+
+## Tech Stack
+
+- **Next.js 16** — React framework with App Router
+- **React 19** — UI library
+- **TypeScript** — Type safety
+- **Tailwind CSS 4** — Utility-first styling
+- **GSAP + ScrollTrigger** — Scroll-driven animations and timeline control
+- **Lenis** — Smooth scroll with configurable duration/easing
+
+## Features
+
+- **Scroll-driven can rotation** — 477 WebP frames preloaded into memory, rendered on a `<canvas>` via 2D context with soft-snap crossfade between frames
+- **Curved SVG text** — Animated text paths that straighten as you scroll
+- **Zone-based text reveals** — 8 keyword stops that highlight as the can rotates past each position
+- **Fade-in sections** — Scroll-triggered opacity and translate animations
+- **Loading screen** — Progress bar that tracks frame preload completion
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Install dependencies
+npm install
+
+# Start dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+├── app/
+│   ├── layout.tsx          # Root layout with fonts and metadata
+│   ├── page.tsx            # Main landing page with all sections
+│   └── globals.css         # Tailwind imports and global styles
+├── components/
+│   ├── ProductCanvas.tsx   # Canvas renderer for the 477-frame sequence
+│   └── Loader.tsx          # Preloader with progress bar
+├── hooks/
+│   ├── useImageSequence.ts # Preloads all frames into memory
+│   └── useSmoothScroll.ts  # Lenis smooth scroll configuration
+├── lib/
+│   └── animations.ts       # GSAP ScrollTrigger animation utilities
+└── public/
+    └── frames_480/         # 477 WebP frames (frame_001.webp – frame_477.webp)
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How It Works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. **Preload** — `useImageSequence` loads all 477 frames into memory before the page is shown, reporting progress to the loader
+2. **Scroll** — Lenis smooths wheel/touch input; GSAP ScrollTrigger maps scroll position to a 0–1 progress value
+3. **Render** — `ProductCanvas` receives progress via `setProgress()`, converts it to a frame index, and draws to canvas using the GSAP ticker for frame-synced rendering
+4. **Crossfade** — A soft-snap blend between adjacent frames eliminates hard pops at frame boundaries while keeping frames sharp for 90%+ of the transition
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Private
