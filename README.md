@@ -20,6 +20,7 @@ A scroll-driven product showcase for the ION energy drink, featuring a 477-frame
 - **Loading screen** — Progress bar that tracks frame preload completion
 
 ## Getting Started
+<<<<<<< HEAD
 
 ```bash
 # Install dependencies
@@ -30,6 +31,9 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+=======
+http://ion-landing.vercel.app/
+>>>>>>> 2924ee5685407ae010ad55e603f505998062ebe8
 
 ## Build
 
@@ -64,6 +68,9 @@ npm start
 3. **Render** — `ProductCanvas` receives progress via `setProgress()`, converts it to a frame index, and draws to canvas using the GSAP ticker for frame-synced rendering
 4. **Crossfade** — A soft-snap blend between adjacent frames eliminates hard pops at frame boundaries while keeping frames sharp for 90%+ of the transition
 
+<<<<<<< HEAD
 ## License
 
 Private
+=======
+>>>>>>> 2924ee5685407ae010ad55e603f505998062ebe8
