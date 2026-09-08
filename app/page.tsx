@@ -165,6 +165,7 @@ function PauseText({ zone }: { zone: number }) {
 
 export default function Home() {
   const canvasRef = useRef<ProductCanvasHandle>(null);
+  const heroTiltRef = useRef<HTMLDivElement>(null);
   const [loadProgress, setLoadProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [show, setShow] = useState(false);
@@ -178,6 +179,19 @@ export default function Home() {
 
   useEffect(() => {
     if (!show) return;
+    const tiltEl = heroTiltRef.current;
+    if (!tiltEl) return;
+
+    // Perspective tilt — quickTo eases toward each target, so the hero leans
+    // with weight instead of snapping (lerp applied to the CSS transform).
+    const tiltX = gsap.quickTo(tiltEl, "rotationX", {
+      duration: 0.8,
+      ease: "power3.out",
+    });
+    const tiltY = gsap.quickTo(tiltEl, "rotationY", {
+      duration: 0.8,
+      ease: "power3.out",
+    });
 
     // Continuous scrub — 1:1 with Lenis scroll, no lag (like lenis.darkroom)
     const st = ScrollTrigger.create({
@@ -187,6 +201,11 @@ export default function Home() {
       scrub: true, // boolean true = exact sync, zero lag
       onUpdate: (self) => {
         canvasRef.current?.setProgress(self.progress);
+        // Subtle scroll-linked tilt: leans toward the viewer mid-track and
+        // sways gently side to side — spatial depth, not flat rotation.
+        const p = self.progress;
+        tiltX?.(Math.sin(p * Math.PI) * -5);
+        tiltY?.(Math.sin(p * Math.PI * 2) * 4);
         // Only trigger React re-render when the zone changes (8 total),
         // not on every scroll frame (~60/sec).
         scrollProgressRef.current = self.progress;
@@ -216,6 +235,8 @@ export default function Home() {
     return () => {
       st.kill();
       ScrollTrigger.getAll().forEach((t) => t.kill());
+      gsap.killTweensOf(tiltEl);
+      gsap.set(tiltEl, { clearProps: "transform" });
     };
   }, [show]);
 
@@ -233,13 +254,20 @@ export default function Home() {
         className={`fixed inset-0 z-10 transition-opacity duration-700 ${
           show ? "opacity-100" : "opacity-0"
         }`}
+        style={{ perspective: "1200px" }}
       >
-        <ProductCanvas
-          ref={canvasRef}
-          frameCount={477}
-          onProgress={onProgress}
-          onReady={onReady}
-        />
+        <div
+          ref={heroTiltRef}
+          className="w-full h-full"
+          style={{ transformStyle: "preserve-3d" }}
+        >
+          <ProductCanvas
+            ref={canvasRef}
+            frameCount={477}
+            onProgress={onProgress}
+            onReady={onReady}
+          />
+        </div>
       </div>
 
       <div

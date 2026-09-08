@@ -19,6 +19,11 @@ interface Props {
   onReady?: () => void;
   onProgress?: (p: number) => void;
   className?: string;
+  /**
+   * How quickly the drawn frame catches up to the scroll target
+   * (higher = snappier, lower = heavier lag). Default: 8.
+   */
+  lerpSpeed?: number;
 }
 
 const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
@@ -28,11 +33,14 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
       onReady,
       onProgress,
       className = "",
+      lerpSpeed = 8,
     },
     ref
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    // Scroll writes the target frame; the ticker eases `current` toward it.
     const targetFrameRef = useRef(0);
+    const currentFrameRef = useRef(0);
     const lastDrawnRef = useRef(-1);
     const lastIntFrameRef = useRef(-1);
     const coverRef = useRef<{ dw: number; dh: number; x: number; y: number } | null>(null);
@@ -130,19 +138,33 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
       [getImage, frameCount]
     );
 
-    // Drive canvas draw from GSAP ticker — same tick as Lenis/ScrollTrigger
+    // Drive canvas draw from GSAP ticker — same tick as Lenis/ScrollTrigger.
+    // The drawn frame eases toward the scroll target (lerp), so the visible
+    // position lags slightly behind the raw scroll position for a fluid,
+    // weight-based feel instead of mechanical snapping.
     useEffect(() => {
       if (!ready) return;
-      const cb = () => draw(targetFrameRef.current);
+      const cb = (_time: number, deltaTime: number) => {
+        const target = targetFrameRef.current;
+        let current = currentFrameRef.current;
+        // Frame-rate independent damping; clamp huge deltas (tab switches etc.)
+        const dt = Math.min(deltaTime || 0.016, 0.05);
+        const t = 1 - Math.exp(-lerpSpeed * dt);
+        current = current + (target - current) * t;
+        // Snap when close so we land exactly on the target frame
+        if (Math.abs(target - current) < 0.001) current = target;
+        currentFrameRef.current = current;
+        draw(current);
+      };
       gsap.ticker.add(cb);
       return () => gsap.ticker.remove(cb);
-    }, [draw, ready]);
+    }, [draw, ready, lerpSpeed]);
 
     useEffect(() => {
       const onResize = () => {
         lastDrawnRef.current = -1;
         coverRef.current = null;
-        draw(targetFrameRef.current);
+        draw(currentFrameRef.current);
       };
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
@@ -152,6 +174,7 @@ const ProductCanvas = forwardRef<ProductCanvasHandle, Props>(
     useEffect(() => {
       if (ready) {
         targetFrameRef.current = 0;
+        currentFrameRef.current = 0;
         lastDrawnRef.current = -1;
         draw(0);
       }
